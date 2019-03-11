@@ -1,0 +1,19 @@
+{
+  "name": "dc311rn-twitterbot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adunkman/dc311rn-twitterbot.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/adunkman/dc311rn-twitterbot/issues"
+  },
+  "homepage": "https://github.com/adunkman/dc311rn-twitterbot#readme"
+}
