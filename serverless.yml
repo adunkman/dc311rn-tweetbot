@@ -1,0 +1,13 @@
+service: dc311rn-twitterbot
+
+provider:
+  name: aws
+  runtime: nodejs8.10
+  stage: prod
+  region: us-east-1
+
+functions:
+  twitterWorker:
+    handler: src/periodic_executor.handler
+    events:
+      - schedule: rate(1 minute)
