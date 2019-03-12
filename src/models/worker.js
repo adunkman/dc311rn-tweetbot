@@ -120,10 +120,9 @@ module.exports = class Worker {
   async reply(tweet, serviceRequests) {
     const urls = serviceRequests.map((sr) => `https://www.dc311rn.com/${sr.service_request_id} (${sr.service_order.service.service_name})`)
     const text = `Status${urls.length > 1 ? "es" : ""}: ${urls.join(", ")} ✨`
-    let response;
 
     try {
-      response = await this.twitter.post('statuses/update', {
+      await this.twitter.post('statuses/update', {
         status: text,
         in_reply_to_status_id: tweet.id_str,
         auto_populate_reply_metadata: true,
@@ -144,12 +143,6 @@ module.exports = class Worker {
     }
     catch (error) {
       console.error(`Could not post reply to tweet ${tweet.id_str}: `, { error });
-      return;
-    }
-
-    if (!response.ok) {
-      const body = await response.json();
-      console.error(`Could not post reply to tweet ${tweet.id_str}: `, { response, body });
       return;
     }
   }
