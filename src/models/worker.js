@@ -131,14 +131,14 @@ module.exports = class Worker {
         long: serviceRequests[0].location.longitude,
         display_coordinates: true,
         exclude_reply_user_ids: [
-          633993114, // @DCDHCD
-          18768730, // @DC_HSEMA
-          22509067, // @dcdmv
-          745716766643523585, // @OUC_DC
-          2964352984, // @DCMOCA
-          86340250, // @DCDPW
-          21789369, // @DDOTDC
-          301494181 // @DC_Housing
+          '633993114', // @DCDHCD
+          '18768730', // @DC_HSEMA
+          '22509067', // @dcdmv
+          '745716766643523585', // @OUC_DC
+          '2964352984', // @DCMOCA
+          '86340250', // @DCDPW
+          '21789369', // @DDOTDC
+          '301494181' // @DC_Housing
         ].join()
       });
     }
