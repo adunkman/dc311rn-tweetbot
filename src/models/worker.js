@@ -63,7 +63,7 @@ module.exports = class Worker {
 
     const tweets = theirs
       .filter(log(tweet => pattern.test(tweet.full_text), 'it has no service request number'))
-      .filter(log(tweet => !ours.find(t => t.id_str === tweet.in_reply_to_status_id_str), 'I have already replied'))
+      .filter(log(tweet => !ours.find(t => t.in_reply_to_status_id_str === tweet.id_str), 'I have already replied'))
       .filter(log(tweet => new Date(Date.parse(tweet.created_at)) > threshold, `it was tweeted earlier than ${threshold}`));
 
     return Promise.all(tweets.map(async (tweet) => {
