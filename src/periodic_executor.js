@@ -9,7 +9,8 @@ exports.handler = async () => {
   });
 
   try {
-    await worker.processTweets();
+    const report = await worker.work();
+    console.log(JSON.stringify(report, null, 2));
   }
   catch (error) {
     console.error(error);

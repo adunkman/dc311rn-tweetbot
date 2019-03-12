@@ -9,112 +9,157 @@ class TwitterApiError extends CustomError {
   }
 }
 
-class DC311RNApiError extends CustomError {
+class ServiceRequestNotFoundError extends CustomError {
   constructor(error) {
     super(error.message);
   }
 }
 
-const log = (filter, reason) => (tweet) => {
-  const result = filter(tweet);
-
-  if (!result) {
-    console.log(`Tweet ${tweet.id_str} excluded because ${reason}. (${JSON.stringify({
-      full_text: tweet.full_text,
-      created_at: tweet.created_at,
-    }, null, 2)})`);
+class DC311ApiUnavailableError extends CustomError {
+  constructor(error) {
+    super(error.message);
   }
+}
 
-  return result;
-};
-
-const matches = (text) => {
-  const numbers = [];
-  const r = new RegExp(pattern, "g");
-  let matches
-
-  while (matches = r.exec(text)) {
-    numbers.push(`${matches[1]}-${matches[2]}`)
+class DC311RNApiUnavailableError extends CustomError {
+  constructor(error) {
+    super(error.message);
   }
-
-  return numbers
-};
+}
 
 module.exports = class Worker {
   constructor(credentials) {
     this.twitter = new Twitter(credentials);
   }
 
-  async processTweets() {
-    let theirs, ours;
+  async work() {
+    const threshold = this.threshold();
+    const tweets = await this.getUserTimelines('311dcgov', 'dc311rn');
+    const repliedTo = tweets['dc311rn'].map(tweet => tweet.in_reply_to_status_id_str);
+    const filtered = await this.filter(tweets['311dcgov'], threshold, repliedTo);
+    const processed = await this.processAll(filtered.needs_reply);
 
+    return {
+      filtered_because_no_service_request: filtered.no_service_request.map(t => t.id_str),
+      filtered_because_has_reply: filtered.has_reply.map(t => t.id_str),
+      filtered_because_too_old: filtered.too_old.map(t => t.id_str),
+      too_old_when_older_than: threshold,
+      service_request_not_found: processed.not_found.map(o => `${o.tweet.id_str}: ${o.error.message}`),
+      successfully_sent_reply: processed.replied.map(t => t.id_str),
+      errored_while_replying: processed.errored,
+    };
+  }
+
+  threshold() {
+    const threshold = new Date();
+    threshold.setHours(threshold.getHours() - 1);
+    return threshold;
+  }
+
+  async getUserTimelines(...users) {
     try {
-      [ theirs, ours ] = await Promise.all([
-        this.get311dcgovtweets(),
-        this.getdc311rntweets(),
-      ]);
+      const statuses = await Promise.all(users.map(u => this.getUserTimeline(u)));
+      return users.reduce((obj, user, i) => ({...obj, [user]: statuses[i]}), {});
     }
     catch (error) {
-      console.error(error);
       throw new TwitterApiError(error);
     }
-
-    const threshold = this.threshold();
-
-    const tweets = theirs
-      .filter(log(tweet => pattern.test(tweet.full_text), 'it has no service request number'))
-      .filter(log(tweet => !ours.find(t => t.in_reply_to_status_id_str === tweet.id_str), 'I have already replied'))
-      .filter(log(tweet => new Date(Date.parse(tweet.created_at)) > threshold, `it was tweeted earlier than ${threshold}`));
-
-    return Promise.all(tweets.map(async (tweet) => {
-      let requests;
-
-      try {
-        requests = await this.getServiceRequests(matches(tweet.full_text));
-      }
-      catch (error) {
-        console.error(`Unable to fetch service requests for tweet ${tweet.id_str}: `, error);
-        return;
-      }
-
-      return this.reply(tweet, requests);
-    }));
   }
 
-  async get311dcgovtweets() {
-    const { statuses } = await this.twitter.get('search/tweets', {
-      result_type: 'recent',
-      tweet_mode: 'extended',
-      q: 'from:311dcgov',
-      count: 15,
-    });
-
-    return statuses;
-  }
-
-  async getdc311rntweets() {
+  async getUserTimeline(username) {
     return this.twitter.get('statuses/user_timeline', {
-      screen_name: 'dc311rn',
+      screen_name: username,
       exclude_replies: false,
       tweet_mode: 'extended',
-    })
+    });
   }
 
-  async getServiceRequests(ids) {
-    return Promise.all(ids.map(async (id) => {
-      const url = `https://api.dc311rn.com/service_requests/${id}`;
-      const response = await fetch(url, {
-        headers: { 'User-Agent': `dc311rn-twitterbot` }
-      });
-      const body = await response.json();
+  async filter(tweets, threshold, replied_to_ids) {
+    const no_service_request = [];
+    const has_reply = [];
+    const too_old = [];
+    const needs_reply = [];
 
-      if (response.ok) {
-        return body;
+    tweets.forEach(tweet => {
+      if (!pattern.test(tweet.full_text)) {
+        no_service_request.push(tweet);
+      }
+      else if (replied_to_ids.includes(tweet.id_str)) {
+        has_reply.push(tweet);
+      }
+      else if (new Date(Date.parse(tweet.created_at)) > threshold) {
+        too_old.push(tweet);
       }
       else {
-        throw new DC311RNApiError(body);
+        needs_reply.push(tweet);
       }
-    }));
+    });
+
+    return {
+      no_service_request,
+      has_reply,
+      too_old,
+      needs_reply,
+    };
+  }
+
+  async processAll(tweets) {
+    const results = await Promise.all(tweets.map(tweet => this.process(tweet)));
+
+    const replied = [];
+    const not_found = [];
+    const errored = [];
+
+    results.forEach((result) => {
+      if (result.reply) {
+        replied.push(result.original);
+      }
+      else {
+        if (result.error instanceof ServiceRequestNotFoundError) {
+          not_found.push({
+            tweet: result.original,
+            error: result.error,
+          });
+        }
+        else {
+          errored.push({
+            tweet: result.original,
+            error: result.error,
+          });
+        }
+      }
+    });
+
+    return {
+      replied,
+      not_found,
+      errored,
+    };
+  }
+
+  async process(tweet) {
+    const ids = this.parse(tweet.full_text);
+
+    try {
+      const service_requests = this.getServiceRequests(ids);
+      const reply = await this.reply(tweet, service_requests);
+      return { original: tweet, reply };
+    }
+    catch (error) {
+      return { original: tweet, error };
+    }
+  }
+
+  parse(text) {
+    const ids = [];
+    const r = new RegExp(pattern, "g");
+    let matches;
+
+    while (matches = r.exec(text)) {
+      ids.push(`${matches[1]}-${matches[2]}`);
+    }
+
+    return ids;
   }
 
   async reply(tweet, serviceRequests) {
@@ -147,9 +192,27 @@ module.exports = class Worker {
     }
   }
 
-  threshold() {
-    const threshold = new Date();
-    threshold.setHours(threshold.getHours() - 2);
-    return threshold;
+  async getServiceRequests(ids) {
+    return Promise.all(ids.map(async (id) => {
+      const url = `https://api.dc311rn.com/service_requests/${id}`;
+      const response = await fetch(url, {
+        headers: { 'User-Agent': `dc311rn-twitterbot` }
+      });
+      const body = await response.json();
+
+      if (response.ok) {
+        return body;
+      }
+
+      if (response.status === 404) {
+        throw new ServiceRequestNotFoundError(body);
+      }
+
+      if (response.status === 504) {
+        throw new DC311ApiUnavailableError(body);
+      }
+
+      throw new DC311RNApiUnavailableError(body);
+    }));
   }
 }
